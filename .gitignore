@@ -1,0 +1,38 @@
+*.aux
+*.log
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+.DS_Store
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Machine-local Claude Code state. The skills and the permission allowlist are
+# tracked on purpose; settings.local.json holds per-machine grants and is not.
+.claude/*
+!.claude/skills/
+!.claude/settings.json
+
+# Calibration scratch; the measured constants land in tools/config.py.
+tests/calibration/out/
+
+# Your bank and your runs. Both hold your name, contact details and career
+# history, and each keeps its own local git repo with no remote — see
+# docs/adr/0019-private-data-boundary.md. The .gitkeep files stay tracked so a
+# clone has the directories the tools expect.
+/bank/**
+/runs/**
+!/bank/.gitkeep
+!/bank/jobs/
+!/bank/jobs/.gitkeep
+!/bank/projects/
+!/bank/projects/.gitkeep
+!/runs/.gitkeep
+
+# Working plans behind the issues. Deliberately untracked: an ADR is the record
+# that ships, and a plan is the scratch that produced it.
+/plans/**

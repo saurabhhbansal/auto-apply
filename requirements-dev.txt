@@ -1,0 +1,9 @@
+# Development only. The running system needs Python 3, pinned Jinja2, pdfLaTeX and git.
+-r requirements.txt
+
+pytest==8.4.2
+
+# Used only by tests/calibration/probe.py, to read where content physically landed
+# on the compiled page: "still one page" is not a sufficient criterion, because
+# pdfTeX compresses glue rather than breaking. Nothing in the running system uses it.
+pypdf==6.14.2

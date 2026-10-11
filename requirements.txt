@@ -1,0 +1,7 @@
+# Jinja2 is the only third-party runtime dependency, and only tools/render.py may
+# import it — pack.py and bank.py stay stdlib-only, which is what enforces the
+# Packer's bank-blindness in code rather than in prose.
+#
+# The other prerequisites are not Python packages: Python 3, pdfLaTeX (TinyTeX or
+# TeX Live), and git.
+Jinja2==3.1.6

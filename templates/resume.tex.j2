@@ -1,0 +1,693 @@
+%%-----------------------------------------------------------------------------
+%% auto-apply résumé template
+%%
+%% A fork of sb2nov "Jake's Resume", used under the MIT License.
+%%   Author        : Jake Gutierrez
+%%   Based off of  : https://github.com/sb2nov/resume
+%%   License       : MIT
+%%
+%% Copyright (c) 2019 Jake Gutierrez
+%%
+%% Permission is hereby granted, free of charge, to any person obtaining a copy
+%% of this software and associated documentation files (the "Software"), to deal
+%% in the Software without restriction, including without limitation the rights
+%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+%% copies of the Software, and to permit persons to whom the Software is
+%% furnished to do so, subject to the following conditions:
+%%
+%% The above copyright notice and this permission notice shall be included in
+%% all copies or substantial portions of the Software.
+%%
+%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+%% FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+%% DEALINGS IN THE SOFTWARE.
+%%-----------------------------------------------------------------------------
+%%
+%% THIS FILE IS HAND-OWNED. Nothing generates it and nothing parses it; each run
+%% renders it whole into runs/<jd-slug>/resume.tex.
+%%
+%% Jinja2 holes are delimited \VAR and \BLOCK (each opening a brace, closing on the
+%% matching one), with autoescape=False, because Jinja's default delimiters collide
+%% with LaTeX braces — which is also why they cannot be written literally even in a
+%% comment here. tools/render.py escapes every LaTeX-special character on each hole.
+%%
+%% Two invariants this file must keep, because tools/config.py's Page-budget constants
+%% are measured against it (docs/calibration.md):
+%%
+%%   1. An Entry header is the SAME height in Experience and in Projects. Both use
+%%      \resumeSubheading, whose second row typesets even when its cells are empty.
+%%   2. A Skills row is NEVER NARROWER than a Bullet. It sits one list level
+%%      shallower, so predicting its width at CHARS_PER_BULLET never under-counts —
+%%      but the count itself stopped being a safe truncation budget the moment a
+%%      BOLD label went on the line, which is what BOLD_CHARS_PER_BULLET charges
+%%      (docs/adr/0020-skills-section.md §6).
+%%
+%% Changing this file's geometry, fonts, margins or macros invalidates those
+%% constants. Re-run docs/calibration.md and commit the new values on their own.
+%%
+%% Three things here are written to be read back by render.py rather than typeset: the
+%% Header-fit measurements, the Summary-fit measurement, and the `%% AUTOAPPLY:element:`
+%% markers. See the blocks above \begin{document}.
+%%
+%% Template context, supplied by tools/render.py:
+%%   profile.name, .phone, .email, .location, .linkedin, .github
+%%   profile.education  — list of {institution, location, degree, dates}
+%%   summary            — one composed paragraph, the page's opening claim about the
+%%                        candidate (docs/adr/0044-the-page-opens-on-a-summary.md). Not
+%%                        optional: the budget charges SUMMARY_LINES for it and
+%%                        SECTION_LINES for its heading every run, so render.py refuses
+%%                        a run that composed none
+%%   entries            — list of {slug, type, title, org, location, dates, lead,
+%%                        bullets} in page order; type is "job" or "project"; slug is
+%%                        the Bank entry id, and each bullet is {ref, text}. `dates` is
+%%                        BUILT by render.py from the entry's started/ended, never
+%%                        typed — `Jan 2026 -- Jul 2026`, `Jul 2026 -- Present`
+%%                        (docs/adr/0031-the-entry-header-is-built.md §2). `lead` is
+%%                        None or one composed sentence — the entry arc's frame
+%%                        (docs/adr/0032-the-entry-arc.md)
+%%   skill_rows         — list of {label, text}, both pre-escaped; text is the row's
+%%                        skills pre-joined with ", "
+%%   supporting_sections— list of {name, heading, rows} in page order, EMPTY on most
+%%                        runs. A supporting section is on the page only because the
+%%                        posting called for it or because the width pass left room
+%%                        (docs/adr/0045-a-supporting-section-is-earned-or-paid-for-out-of-the-room.md).
+%%                        Each row is {slug, label, text}: `label` is BUILT by
+%%                        render.py from the entry's title, `text` from its org, its
+%%                        dates and — where one was composed — one cited Claim's
+%%                        one-clause tail. Both pre-escaped
+%%
+%% One trap for render.py: .email, .linkedin, .github and a project's .link are used
+%% BOTH as visible text and as \href targets. LaTeX escaping is right for the visible
+%% copy and wrong for the target — an escaped \_ inside \href silently breaks the link
+%% — so each comes twice: escaped, and raw as .email_url, .linkedin_url, .github_url,
+%% .link_url for the target.
+
+\documentclass[a4paper,11pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\input{glyphtounicode}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+%% Margins
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1.0in}
+
+\urlstyle{same}
+
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+%% Section formatting
+\titleformat{\section}{
+  \vspace{-4pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+%% ATS-safety: make the generated PDF machine-readable. This, and the single
+%% column below it, are the whole reason the lineage is LaTeX
+%% (docs/adr/0007-rendering-approach.md §2).
+\pdfgentounicode=1
+
+%% Reproducibility: an unchanged run folder must yield a byte-identical PDF, so a git
+%% diff always means something changed. There is no \today here and render.py pins
+%% SOURCE_DATE_EPOCH, but pdfTeX still stamps a creation date and a random trailer
+%% /ID. These three suppress that.
+\pdfinfoomitdate=1
+\pdfsuppressptexinfo=-1
+\pdftrailerid{}
+
+%% The Overflow check's threshold: how far past the right margin content may run
+%% before TeX is asked to mention it.
+%%
+%% \resumeSubheading and \resumeEducationRow are built on tabular* with l/r columns,
+%% which do not line-break, and a Bullet holding one unbreakable token behaves the
+%% same. All three overflow rather than wrap, so they cost the page no height and the
+%% page-count assert never fires — but LaTeX warns, and render.py fails the run on
+%% anything TeX still reports here.
+%%
+%% This is NOT a Page-budget constant. \hfuzz changes what is REPORTED, never what is
+%% typeset: no glyph moves, so it cannot change selection. 2pt is a judgement about
+%% what a reader can see, not a measurement — pdfTeX's own default of 0.1pt is a
+%% judgement about what is worth mentioning.
+\hfuzz=2pt
+
+%%----------- Macros -----------
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-2pt}}
+  }
+}
+
+%% Used by BOTH Experience and Projects, so an Entry header is one height — which is
+%% what lets ENTRY_HEADER_LINES be a single constant.
+%%
+%% The closing \vspace is -8pt, not upstream Jake's Resume's -7pt, which measured
+%% 28.84pt against the 28.00pt ceiling of two Bullet lines and rounded the constant up
+%% to 3. Do not tune it casually:
+%%
+%%   -8pt clears the ceiling by 0.16pt. Any change to the font, the margins or this
+%%   tabular* can push it back over. The probe catches that loudly.
+%%
+%%   -9pt does NOT work, though it looks safer: it makes an Education row's marginal
+%%   cost measure one line while still being charged two, breaking the invariant that
+%%   an Education row costs the same as an Entry header.
+%%
+%%   -12pt was tried and reverted: it leaves 7.7pt between the org/location line and
+%%   the first Bullet, less than \small's own leading, so descenders collide.
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-8pt}
+}
+
+%% A project's header — ONE row, not two (docs/adr/0057-the-page-reads-like-a-resume.md
+%% §3). A personal project has no employer and no office, and the second row a job
+%% header spends on them read `Personal project` / `Open source` on a real page: a line
+%% saying nothing, on every project. What a reader wants in its place is what it was
+%% built with, so the left cell is the name in bold, then the entry's `stack:` in
+%% italics, then its `link:` if it has one; the dates keep the right cell.
+%% PROJECT_HEADER_LINES charges it; the probe measures it. -9pt rather than the job
+%% header's -8pt: at -8pt the row measured 14.66pt and rounded to two lines.
+\newcommand{\resumeProjectHeading}[2]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      #1 & #2 \\
+    \end{tabular*}\vspace{-9pt}
+}
+
+%% The lead line — the entry arc's frame, docs/adr/0032-the-entry-arc.md. One
+%% unbulleted line under the header and above the Bullets, carrying the situation
+%% and/or the aggregate. It continues \resumeSubheading's own \item — a SECOND
+%% \item in the same list would pay that list's topsep/parsep glue a second time,
+%% ~11pt for nothing typeset, which is exactly what the Skills list's own zeroed
+%% topsep exists to avoid one section down. It sits one list level shallower than
+%% the Bullets' nested \resumeItemListStart, which is what makes it wider than
+%% CHARS_PER_BULLET and why LEAD_CHARS is its own measured constant.
+%%
+%% It carries \resumeEmph, on the same mechanical rules a Bullet does, and BOLD_LEAD_CHARS
+%% is LEAD_CHARS's twin measured at THIS \linewidth for the same reason LEAD_CHARS is
+%% its own: a lead's bold is not a Bullet's bold at a Bullet's width
+%% (docs/adr/0046-every-impact-figure-and-the-declared-keyword.md, Addendum). The macro
+%% below is unchanged and adds no glue, no box and no list level, so no height moved.
+\newcommand{\resumeEntryLead}[1]{
+  \par\vspace{-2pt}\small{#1}\vspace{-8pt}
+}
+
+%% The Summary — the page's opening claim about the candidate, and the one element
+%% here that may echo the posting's own vocabulary
+%% (docs/adr/0044-the-page-opens-on-a-summary.md §2).
+%%
+%% One unbulleted paragraph under its own \section{Summary} heading, above every other
+%% section. It opens no list and sits at top level, so its \linewidth is the full
+%% \textwidth — WIDER THAN A LEAD'S, which is why SUMMARY_CHARS is its own measured
+%% constant and neither CHARS_PER_BULLET nor LEAD_CHARS may be reused for it.
+%%
+%% \small, matching the body text every other composed line on the page is set in,
+%% and inside a \begingroup with the \par before the \endgroup. Both halves are
+%% load-bearing: the group keeps \small off the Experience heading below, and the
+%% \par inside it is what makes the paragraph's last line take \small's own
+%% baselineskip rather than the body font's.
+%%
+%% THIS MACRO NOW CARRIES ONE \vspace, NOT TWO, AND THE MISSING ONE IS THE POINT.
+%% It was -6.5pt leading and -1.5pt trailing while the block ran heading-less: the
+%% leading value existed to pull the paragraph up to 17.43pt under the contact line —
+%% the distance a \section heading keeps above its own first row — because the
+%% paragraph was standing in for a first row with no heading over it.
+%%
+%% The heading is there now, so its own after-skip sets that distance: the paragraph
+%% measures 17.33pt under the Summary rule, against 17.33pt for a Skills row and
+%% 17.90pt for an Entry header. NOTHING HERE TUNES IT. A leading \vspace would now
+%% only fight the heading it sits under.
+%%
+%% What the -6.5pt was really absorbing was the \end{center} glue above it, and that
+%% is now trimmed where it is generated — \headerContactLine's own \vspace{-3pt} in
+%% the header block below, which is what puts the Summary rule 24.71pt under the
+%% contact line, inside the 23.91–24.97pt every other heading on this page keeps.
+%%
+%% THE TRAILING -1.5pt IS UNCHANGED AND STILL MEASURED: it puts the Experience rule
+%% 24.91pt under the Summary's last baseline, the same distance every other heading
+%% gets. \section's own \titleformat opens with \vspace{-4pt}, so the gap below this
+%% block is the two together.
+%%
+%% THE HEIGHT IS NOW PRICED WITH THE HEADING AND CANNOT HONESTLY BE PRICED WITHOUT IT.
+%% \section contributes its space through \addvspace, which MERGES with the skip
+%% already on the vertical list rather than adding to it — so the heading and the
+%% paragraph share glue, and a differential that removed only one of them would charge
+%% that glue twice or to neither. The probe removes the pair and prices them together
+%% against SECTION_LINES + SUMMARY_LINES: 54.39pt against 4 x 14.00 = 56.00pt.
+%%
+%% SUMMARY_LINES charges the paragraph two Bullet lines, and NOTHING IN THE PDF SAYS
+%% WHEN IT RUNS TO THREE: a paragraph breaks legally, so LaTeX warns about nothing and
+%% the budget quietly over-promises by a line. That is the Static profile header's
+%% failure mode, and it gets the header's answer — the instrumentation at the end of
+%% the document measures this same macro's argument and render.py refuses the run.
+\newcommand{\summaryLine}{\VAR{summary}}
+\newcommand{\resumeSummary}[1]{\begingroup\small #1\par\endgroup\vspace{-1.5pt}}
+
+%% Education's own twin of \resumeSubheading, identical but for the trailing \vspace.
+%% It exists because an Education row is 3.44pt taller than an Entry header — enough
+%% that, welded to the same macro, it forced ENTRY_HEADER_LINES to 3 and cost the page
+%% a fifth of its evidence. Nothing sits under an Education row, so the tighter
+%% \vspace collides with nothing; the only gap it closes is between two stacked rows,
+%% measured at 13.63pt against \small's ~12pt leading.
+%%
+%% This is NOT a sixth constant. ENTRY_HEADER_LINES charges both macros, and the
+%% probe's "Education row costs the same lines as an Entry header" check enforces it.
+%% If that fails, tighten a macro — do not add a constant.
+\newcommand{\resumeEducationRow}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-12pt}
+}
+
+%% The same row with a job header's -8pt tail, for the last Education row when the
+%% section sits at the top of the page (see the call site).
+\newcommand{\resumeEducationRowAbove}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-8pt}
+}
+
+%% The emphasis a composed line may carry: every impact figure on it, plus up to two
+%% terms the maker declared (docs/adr/0043-the-number-carries-the-emphasis.md, and
+%% docs/adr/0046-every-impact-figure-and-the-declared-keyword.md, which widened it
+%% from one span to a set). render.py decides the spans and wraps each one; the only
+%% call sites are the Bullets and the Summary, which carries keywords and no figures.
+%%
+%% It is \textbf and nothing else — the SAME bold the Skills labels and
+%% \resumeSubheading already set, which is what lets BOLD_CHARS_PER_BULLET charge a
+%% bolded Bullet without a second measurement. It adds no glue, no box and no list
+%% level, so no element's height moves and no Page-budget constant does either;
+%% the calibration probe is still run on a change here and must come back unmoved.
+%%
+%% It exists as a named macro rather than a bare \textbf at the call site so the
+%% Template keeps owning what emphasis LOOKS like — small caps or a semibold later is
+%% one line here and no change in render.py (docs/adr/0007-rendering-approach.md).
+\newcommand{\resumeEmph}[1]{\textbf{#1}}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+%% The Skills breadth list is a list of its own, and a stock itemize wraps it in ~11pt
+%% of topsep and parskip — enough to push a one-row section to two lines of budget.
+%% Zeroing THAT glue is what makes a row cost SKILLS_ROW_PT and nothing more, and it
+%% is also why rows two through six are uniform to within 0.00pt.
+%%
+%% ITEMSEP IS THE ONE THAT IS NOT ZEROED, and it was 0pt until the rows were read on a
+%% compiled page. \resumeItem carries a \vspace{-2pt} sized for the stock itemize the
+%% Bullets sit in, which contributes 4pt between items; here there was no such glue for
+%% it to come out of, so a row sat 10.00pt below the one above it — TIGHTER THAN
+%% \small'S OWN 12pt LEADING, and the only place on the page set that way.
+%%
+%% 4pt puts a row at 12 + 4 - 2 = 14.00pt, the SAME distance the Experience Bullets
+%% keep between items, so the two sections read as one page. It is rigid rather than
+%% rubber on purpose: the calibration reads natural heights, and a spring here would
+%% make a row's cost depend on how hard TeX squeezed the page.
+%%
+%% The row still pays this once, not once per typeset line — a wrapped row's second
+%% line is inside the item and takes \small's plain leading. That is what keeps
+%% SKILLS_ROW_PT and SKILLS_ROW_WRAP_PT two numbers, and it is also what lets the eye
+%% tell a wrapped row from the next row down, exactly as it does in a Bullet list.
+\newcommand{\resumeSkillsListStart}{%
+  \begin{itemize}[leftmargin=0.15in, label={}, topsep=0pt, partopsep=0pt,
+                  parsep=0pt, itemsep=4pt]}
+\newcommand{\resumeSkillsListEnd}{\end{itemize}}
+
+%% A supporting row — one line of Certifications, Positions of Responsibility or
+%% Extracurriculars (docs/adr/0045-a-supporting-section-is-earned-or-paid-for-out-of-the-room.md §3).
+%%
+%% IT IS THE SAME ELEMENT AS A SKILLS ROW, and that is the whole reason config.py
+%% gains no constant for it: \resumeItem carrying a bold label and plain text, inside
+%% \resumeSkillsListStart's own list glue. SKILLS_ROW_PT charges both call sites,
+%% and the calibration probe's "a supporting row costs the same as a Skills row"
+%% check is what holds them together — the same arrangement ENTRY_HEADER_LINES has
+%% with \resumeSubheading and \resumeEducationRow. If it fails, tighten a macro
+%% rather than splitting the constant (§6).
+%%
+%% #1 is the entry's title, bold. #2 is everything after it — its org, its dates and,
+%% where one was composed, one Claim's tail — built by render.py so the punctuation
+%% between them is decided in exactly one place. There is no \textit here: the whole
+%% row is one typeset line by construction, and an italic run inside it would need a
+%% second width rate to be charged honestly.
+\newcommand{\resumeSupportingRow}[2]{\resumeItem{\textbf{#1} #2}}
+
+%%----------- The Header-fit and Summary-fit instrumentation -----------
+%% The things here that exist to be READ BACK by tools/render.py rather than typeset.
+%%
+%% The two header lines and the Summary are the elements in this file whose overflow
+%% is SILENT: both break legally, so LaTeX warns about nothing and the page budget
+%% over-promises by a whole line. Everything else runs past the right margin instead,
+%% and says so in the log.
+%%
+%% So this does not judge a width — it asks TeX. Each header line is measured twice
+%% from the SAME macro the page typesets it from: once as an \hbox, always one line,
+%% and once inside a \parbox TeX line-breaks for real. Taller means it broke. A width
+%% comparison would get it wrong, since whether a line breaks depends on how far its
+%% own interword glue will shrink.
+%%
+%% The widths go to the log too, read only on the failure path so the message can say
+%% how many characters to cut. One value per \typeout, because pdfTeX wraps the .log
+%% at 79 columns and a single line carrying all four would be split mid-number.
+%% BEGIN header-fit instrumentation
+\newsavebox{\headerFitFlat}
+\newsavebox{\headerFitBroken}
+\newcommand{\headerFitLine}[2]{%
+  \begingroup
+    %% \href allocates a link annotation for whatever it wraps, even inside a box
+    %% that is never shipped. Dropping to the visible text is what keeps the PDF
+    %% byte-identical, and it does not move the width by a scaled point.
+    \renewcommand{\href}[2]{##2}%
+    \sbox{\headerFitFlat}{#2}%
+    \sbox{\headerFitBroken}{\parbox{\linewidth}{\centering #2}}%
+    \dimen0=\ht\headerFitFlat \advance\dimen0 by \dp\headerFitFlat
+    \dimen2=\ht\headerFitBroken \advance\dimen2 by \dp\headerFitBroken
+    \typeout{AUTOAPPLY:headerfit:#1:flat:\the\dimen0}%
+    \typeout{AUTOAPPLY:headerfit:#1:broken:\the\dimen2}%
+    \typeout{AUTOAPPLY:headerfit:#1:width:\the\wd\headerFitFlat}%
+    \typeout{AUTOAPPLY:headerfit:#1:avail:\the\linewidth}%
+  \endgroup
+}
+
+%% The Summary's own measurement, and it asks a different question from the header's.
+%% A header line either fits on one line or it does not, so that check compares an
+%% unbreakable \hbox against a line-broken \parbox and reads "taller means it broke".
+%% The Summary is a PARAGRAPH — it is MEANT to break, twice — so what has to be
+%% measured is how far: its height against the SUMMARY_LINES the budget charged it.
+%% One \parbox at the same \linewidth the block typesets at, and render.py does the
+%% comparison, because the ceiling is `SUMMARY_LINES x BULLET_LINE_PT` and the
+%% Template does not know either constant.
+\newsavebox{\summaryFitBox}
+\newcommand{\summaryFitLine}{%
+  \begingroup
+    \sbox{\summaryFitBox}{\parbox{\linewidth}{\small\summaryLine}}%
+    \dimen0=\ht\summaryFitBox \advance\dimen0 by \dp\summaryFitBox
+    \typeout{AUTOAPPLY:summaryfit:height:\the\dimen0}%
+    \typeout{AUTOAPPLY:summaryfit:avail:\the\linewidth}%
+  \endgroup
+}
+%% END header-fit instrumentation
+
+%%----------- The Overflow check's markers -----------
+%% Read back by tools/render.py; defines nothing.
+%%
+%% An `Overfull \hbox` warning indexes into the resume.tex render.py wrote, which is
+%% useless to the maker because it is overwritten next run. So every element that can
+%% overflow carries a marker comment on the line above it:
+%%
+%%     %% AUTOAPPLY:element:<kind>:<id>
+%%
+%% and render.py attributes each report to the nearest preceding marker. Kinds are
+%% `profile`, `summary`, `entry`, `lead`, `bullet`, `skills`, `supporting` and
+%% `education`; the id is the Bank entry slug (`entry`, `lead` and `supporting` each
+%% use the Entry's own slug), the `<slug>/c<n>` or `<slug>/c<n>+c<n>` claim ref, or the
+%% 1-based Education or Skills row number. The Summary's id is the literal `page`:
+%% there is exactly one of it and it belongs to no Entry.
+%%
+%% A supporting row is markered by SLUG rather than by row number, which is the
+%% opposite of the Skills row's choice one paragraph down — and for the reason given
+%% there. A Skills row's identity is its run-authored label, which has no business
+%% inside a LaTeX comment; a supporting row's identity is a Bank entry slug, which is
+%% `[A-Za-z0-9._-]` by construction and is exactly what the maker has to go and edit.
+%%
+%% A Skills row is markered by NUMBER rather than by its label, following the
+%% Education precedent: the label is run-authored text, and a `%` or a stray
+%% character inside a marker comment is exactly the breakage this block warns about.
+%% Nothing is lost — render.py carries the human wording separately, so an overflow
+%% is still reported as "the AI & GenAI skills row".
+%%
+%% A marker MUST sit on its own line between macro calls: `%` eats the rest of the
+%% line and the line break, so one dropped into running prose would weld the word
+%% before it to the word after. On its own line it contributes nothing to the typeset
+%% output, so it owes no recalibration — tests/test_template.py holds both.
+%%
+%% The header-fit and summary-fit instrumentation at the end of the document is
+%% deliberately not markered; render.py drops reports between its BEGIN/END markers,
+%% since it measures boxes it never ships.
+
+%%-----------------------------------------------------------------------------
+\begin{document}
+
+%%----------- Static profile: the header -----------
+%% Never competes for Slots. Each line is a macro so the Header-fit check measures the
+%% very tokens the page typesets, rather than a copy that could drift from them.
+\newcommand{\headerNameLine}{\textbf{\Huge \scshape \VAR{profile.name}}}
+%% `phone`, `linkedin` and `github` are optional; each is dropped with its separator.
+\newcommand{\headerContactLine}{\small \VAR{profile.location}\BLOCK{if profile.phone} $|$ \VAR{profile.phone}\BLOCK{endif} $|$
+    \href{mailto:\VAR{profile.email_url}}{\underline{\VAR{profile.email}}}\BLOCK{if profile.linkedin} $|$
+    \href{https://\VAR{profile.linkedin_url}}{\underline{\VAR{profile.linkedin}}}\BLOCK{endif}\BLOCK{if profile.github} $|$
+    \href{https://\VAR{profile.github_url}}{\underline{\VAR{profile.github}}}\BLOCK{endif}}
+%%
+%% THE \vspace{-3pt} AFTER THE CONTACT LINE IS THE SUMMARY HEADING'S, PAID HERE.
+%% \end{center} leaves 3pt more glue behind it than the page's own grammar wants, so
+%% the first heading under it sat 27.70pt below the contact line where every other
+%% heading on the page keeps 23.91–24.97pt. Nothing revealed that while the Summary
+%% ran heading-less — its \resumeSummary carried a -6.5pt leading \vspace that
+%% absorbed the same glue one element lower down.
+%%
+%% It is trimmed HERE rather than above \section{Summary} because a \vspace between
+%% \end{center} and a heading does not subtract 3pt: \section contributes its space
+%% with \addvspace, which MERGES with the skip already on the list, and anything
+%% intervening stops the merge and makes the two ADD — measured, a bare \vspace{0pt}
+%% there costs 11.96pt. Inside the center box the merge is untouched and -3pt means
+%% -3pt. The Summary rule lands 24.71pt under the contact line.
+%%
+%% It is charged to HEADER_LINES, which is where the probe's differential puts it and
+%% where it belongs — the header measures 33.91pt where it measured 36.91pt, and 3 is
+%% still the constant.
+%% AUTOAPPLY:element:profile:header
+\begin{center}
+    \headerNameLine \\ \vspace{1pt}
+    \headerContactLine\vspace{-3pt}
+\end{center}
+
+%%----------- Summary -----------
+%% The page's opening claim about the candidate. Composed per run like a Bullet, and
+%% charged SUMMARY_LINES by the budget whether or not anything was composed — which is
+%% why there is no emptiness guard here and render.py refuses a run with no
+%% `## Summary` section instead (docs/adr/0044-the-page-opens-on-a-summary.md §5).
+%%
+%% THE HEADING IS THE SAME \section EVERY OTHER SECTION USES, and it is charged the
+%% same SECTION_LINES they are — two more lines of overhead on every page, on top of
+%% the prose's own two (docs/adr/0044-the-page-opens-on-a-summary.md, Addendum). §1
+%% of that ADR refused it and the maker reopened it; what is NOT reopened is the
+%% element's own shape, which is one \small paragraph and nothing else.
+%%
+%% It is charged unconditionally, beside SUMMARY_LINES and unlike the Experience,
+%% Projects and Education headings the budget counts: those exist because their
+%% section has rows, and this one is on every page that renders.
+%%
+%% The marker sits UNDER the heading, the way every other section's markers do: the
+%% heading is a fixed string that cannot overflow, and a marker above it would make
+%% `summary:page` the nearest preceding marker for the heading too.
+\section{Summary}
+%% AUTOAPPLY:element:summary:page
+\resumeSummary{\summaryLine}
+
+%% Section routing is by Entry type. The Packer hands over one score-ordered
+%% list; the template splits it, so routing is visible here rather than being a
+%% shape decision buried in render.py.
+\BLOCK{set jobs = entries | selectattr('type', 'equalto', 'job') | list}
+\BLOCK{set projects = entries | selectattr('type', 'equalto', 'project') | list}
+\#{
+  Experience and Projects are ONE shape. They differ in their heading and in which
+  half of the pool they draw from, and in nothing else — same \resumeSubheading, same
+  Bullet list, and, the part that matters, the same two AUTOAPPLY:element markers the
+  Overflow check attributes its reports to. Written out twice, the markers were the
+  thing most likely to drift, and a drifted marker does not fail to name the offender
+  — it names the wrong one, and sends the maker to the wrong file.
+
+  This note is a JINJA comment, not a LaTeX one, and that is deliberate. Every %%
+  comment in this file is literal text copied into each rendered resume.tex; this one
+  is for whoever edits the template, so it costs the render nothing. It is the only
+  such comment here, which is why the delimiters look unfamiliar — see render.py's
+  Jinja environment, where comment_start_string is set alongside \VAR and \BLOCK.
+
+  Two whitespace details are load-bearing, because this macro must render exactly the
+  bytes the two copies did:
+
+    The body ends WELDED to the endmacro tag, so the macro emits no trailing newline
+    and the newline after the call site supplies it. On its own line, endmacro would
+    add a second one.
+
+    The emptiness guard stays OUTSIDE the call, at each call site. An empty section
+    must vanish whole — an empty itemize is a LaTeX error — and a guard inside the
+    macro would still leave the call site's own newline behind as a blank line.
+}
+\BLOCK{macro entry_section(name, section_entries)}
+\section{\VAR{name}}
+  \resumeSubHeadingListStart
+\BLOCK{for entry in section_entries}
+%% AUTOAPPLY:element:entry:\VAR{entry.slug}
+\BLOCK{if entry.type == 'project'}
+    \resumeProjectHeading
+      {\textbf{\VAR{entry.title}}\BLOCK{if entry.stack} $|$ \textit{\small \VAR{entry.stack}}\BLOCK{endif}\BLOCK{if entry.link} $|$ \small\href{https://\VAR{entry.link_url}}{\underline{\VAR{entry.link}}}\BLOCK{endif}}{\VAR{entry.dates}}
+\BLOCK{else}
+    \resumeSubheading
+      {\VAR{entry.title}}{\VAR{entry.dates}}
+      {\VAR{entry.org}}{\VAR{entry.location}}
+\BLOCK{endif}
+\BLOCK{if entry.lead}
+%% AUTOAPPLY:element:lead:\VAR{entry.slug}
+    \resumeEntryLead{\VAR{entry.lead}}
+\BLOCK{endif}
+\BLOCK{if entry.bullets}
+      \resumeItemListStart
+\BLOCK{for bullet in entry.bullets}
+%% AUTOAPPLY:element:bullet:\VAR{bullet.ref}
+        \resumeItem{\VAR{bullet.text}}
+\BLOCK{endfor}
+      \resumeItemListEnd
+\BLOCK{endif}
+\BLOCK{endfor}
+  \resumeSubHeadingListEnd\BLOCK{endmacro}
+
+%%----------- Static profile: Education -----------
+%% A static block from bank/profile.md. It never competes
+%% (docs/adr/0013-ingestion-shape.md §7).
+%%
+%% It renders in ONE of two places, and the page height is the same either way — a
+%% section is a section wherever it sits. A student or recent graduate leads with it,
+%% because the degree is the most important credential they hold and every recruiter
+%% reading a new-graduate page looks for it first; anyone further along keeps it at the
+%% bottom. render.py decides `education_first` from the profile
+%% (docs/adr/0057-the-page-reads-like-a-resume.md §2).
+\BLOCK{macro education_section()}
+\BLOCK{if profile.education}
+\section{Education}
+  \resumeSubHeadingListStart
+\BLOCK{for school in profile.education}
+%% AUTOAPPLY:element:education:\VAR{loop.index}
+%% At the top of the page the last row's -12pt tail would weld it to the Experience
+%% heading, so that one row takes the job header's -8pt instead. It is the row's own
+%% tail, not a \vspace after the list: a separate glue node between two lists stops
+%% their skips merging and measured a whole line, where this costs the 4pt it says.
+%% The probe calibrates PAGE_LINES against both placements.
+    \BLOCK{if education_first and loop.last}\resumeEducationRowAbove\BLOCK{else}\resumeEducationRow\BLOCK{endif}
+
+      {\VAR{school.institution}}{\VAR{school.location}}
+      {\VAR{school.degree}\BLOCK{if school.gpa is defined and school.gpa}, \VAR{school.gpa}\BLOCK{endif}}{\VAR{school.dates}}
+\BLOCK{endfor}
+  \resumeSubHeadingListEnd
+\BLOCK{endif}
+\BLOCK{endmacro}
+\BLOCK{if education_first}
+\VAR{education_section()}
+\BLOCK{endif}
+
+%%----------- Experience -----------
+%% The Experience floor places the two most recent jobs at >= 1 Bullet, so this
+%% section is never empty on a real run. The guard is for synthetic input.
+\BLOCK{if jobs}
+\VAR{entry_section('Experience', jobs)}
+\BLOCK{endif}
+
+%%----------- Projects -----------
+\BLOCK{if projects}
+\VAR{entry_section('Projects', projects)}
+\BLOCK{endif}
+
+%%----------- Skills -----------
+%% A breadth list, not a Bullet competition — the cheap real estate where a
+%% Nice-to-have survives its Entry losing the page. One row per category, its label
+%% named from the posting's own vocabulary, inside the Bullet list geometry
+%% (docs/adr/0020-skills-section.md).
+%%
+%% The heading is `Skills` and not `Technical Skills`: a row label is named from the
+%% posting, and a posting may state a non-technical must-have as plainly as a
+%% technical one — the page this changed on carried a `Collaboration` row under the
+%% old heading. `Skills` is the one word that cannot contradict the labels beneath
+%% it, and its height is SECTION_LINES whatever the string
+%% (docs/adr/0031-the-entry-header-is-built.md §6).
+\BLOCK{if skill_rows}
+\section{Skills}
+  \resumeSkillsListStart
+\BLOCK{for row in skill_rows}
+%% AUTOAPPLY:element:skills:\VAR{loop.index}
+    \resumeItem{\textbf{\VAR{row.label}:} \VAR{row.text}}
+\BLOCK{endfor}
+  \resumeSkillsListEnd
+\BLOCK{endif}
+
+%%----------- The supporting sections -----------
+%% Certifications, Positions of Responsibility, Extracurriculars — in that order,
+%% after Skills and before Education, and USUALLY ABSENT ALTOGETHER
+%% (docs/adr/0045-a-supporting-section-is-earned-or-paid-for-out-of-the-room.md §7).
+%%
+%% Nothing here competes. A section is on this page for one of exactly two reasons —
+%% the posting called for it, or the width pass left room the Bullets did not want —
+%% and `allocation.md`'s `## Supporting` says which, per row. Bottom-of-page is where
+%% the white space the second reason spends actually is.
+%%
+%% The whole loop is one shape for all three sections, for the reason the
+%% Experience/Projects macro above is one shape for two: the markers were the thing
+%% most likely to drift if written out three times, and a drifted marker does not
+%% fail to name the offender — it names the wrong one.
+\BLOCK{for section in supporting_sections}
+\section{\VAR{section.heading}}
+  \resumeSkillsListStart
+\BLOCK{for row in section.rows}
+%% AUTOAPPLY:element:supporting:\VAR{row.slug}
+    \resumeSupportingRow{\VAR{row.label}}{\VAR{row.text}}
+\BLOCK{endfor}
+  \resumeSkillsListEnd
+\BLOCK{endfor}
+
+%%----------- Static profile: Education, at the bottom -----------
+%% Where an experienced reader expects it. A student's page carries it at the top
+%% instead — see `education_section` above Experience.
+\BLOCK{if not education_first}
+\VAR{education_section()}
+\BLOCK{endif}
+
+%%----------- The Header-fit and Summary-fit checks: the measurement -----------
+%% Last, rather than beside the elements they measure, and that placement is
+%% load-bearing: measuring the \Huge \scshape name line up there loads a font the
+%% shipped page never uses, which shifts the /F resource number of every font after
+%% it — same glyphs, different bytes. Down here the page stream comes out
+%% byte-identical to the same résumé built without these lines, which
+%% tests/test_template.py holds.
+%%
+%% The Summary measurement rides in the same block for the same reason and one more:
+%% \linewidth here is \textwidth, which is exactly the width the Summary typesets at
+%% above, so the \parbox breaks the paragraph where the page breaks it.
+%%
+%% Nothing below typesets: \sbox measures into a register, \typeout writes to the log.
+%% BEGIN header-fit instrumentation
+\headerFitLine{name}{\headerNameLine}%
+\headerFitLine{contact}{\headerContactLine}%
+\summaryFitLine%
+%% END header-fit instrumentation
+
+\end{document}
